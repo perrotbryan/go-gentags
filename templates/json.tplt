@@ -1,0 +1,327 @@
+{{/* ===================== Helper Templates ===================== */}}
+
+{{ define "DecodePrimitive" }}
+{{- if eq .FieldType "string" }}
+v, err := strconv.Unquote(string(raw))
+if err != nil {
+	return fmt.Errorf("invalid string for {{ .TagValue }}: %w", err)
+}
+o.{{ .FieldName }} = v
+
+{{- else if or (eq .FieldType "int") (eq .FieldType "int8") (eq .FieldType "int16") (eq .FieldType "int32") (eq .FieldType "int64") }}
+n, err := strconv.ParseInt(string(raw), 10, 64)
+if err != nil {
+	return fmt.Errorf("invalid integer for {{ .TagValue }}: %w", err)
+}
+o.{{ .FieldName }} = {{ .FieldType }}(n)
+
+{{- else if or (eq .FieldType "uint") (eq .FieldType "uint8") (eq .FieldType "uint16") (eq .FieldType "uint32") (eq .FieldType "uint64") }}
+n, err := strconv.ParseUint(string(raw), 10, 64)
+if err != nil {
+	return fmt.Errorf("invalid unsigned integer for {{ .TagValue }}: %w", err)
+}
+o.{{ .FieldName }} = {{ .FieldType }}(n)
+
+{{- else if or (eq .FieldType "float32") (eq .FieldType "float64") }}
+f, err := strconv.ParseFloat(string(raw), 64)
+if err != nil {
+	return fmt.Errorf("invalid float for {{ .TagValue }}: %w", err)
+}
+o.{{ .FieldName }} = {{ .FieldType }}(f)
+
+{{- else if eq .FieldType "bool" }}
+b, err := strconv.ParseBool(string(raw))
+if err != nil {
+	return fmt.Errorf("invalid bool for {{ .TagValue }}: %w", err)
+}
+o.{{ .FieldName }} = b
+
+{{- else }}
+if err := json.Unmarshal(raw, &o.{{ .FieldName }}); err != nil {
+	return fmt.Errorf("unmarshal error on {{ .TagValue }}: %w", err)
+}
+{{- end }}
+{{ end }}
+
+{{ define "DecodePointer" }}
+if string(raw) == "null" {
+	o.{{ .FieldName }} = nil
+} else {
+	var v {{ unPointer .FieldType }}
+	{{- if .IsBasic }}
+	{{ template "DecodePrimitiveValue" . }}
+	{{- else }}
+	if err := v.UnmarshalJSON(raw); err != nil {
+		return fmt.Errorf("unmarshal error on {{ .TagValue }}: %w", err)
+	}
+	{{- end }}
+	o.{{ .FieldName }} = &v
+}
+{{ end }}
+
+{{ define "DecodePrimitiveValue" }}
+{{- if eq .FieldType "*string" }}
+s, err := strconv.Unquote(string(raw))
+if err != nil {
+	return fmt.Errorf("invalid string for {{ .TagValue }}: %w", err)
+}
+v = s
+
+{{- else if or (eq .FieldType "*int") (eq .FieldType "*int8") (eq .FieldType "*int16") (eq .FieldType "*int32") (eq .FieldType "*int64") }}
+n, err := strconv.ParseInt(string(raw), 10, 64)
+if err != nil {
+	return fmt.Errorf("invalid integer for {{ .TagValue }}: %w", err)
+}
+v = {{ unPointer .FieldType }}(n)
+
+{{- else if or (eq .FieldType "*uint") (eq .FieldType "*uint8") (eq .FieldType "*uint16") (eq .FieldType "*uint32") (eq .FieldType "*uint64") }}
+n, err := strconv.ParseUint(string(raw), 10, 64)
+if err != nil {
+	return fmt.Errorf("invalid unsigned integer for {{ .TagValue }}: %w", err)
+}
+v = {{ unPointer .FieldType }}(n)
+
+{{- else if or (eq .FieldType "*float32") (eq .FieldType "*float64") }}
+f, err := strconv.ParseFloat(string(raw), 64)
+if err != nil {
+	return fmt.Errorf("invalid float for {{ .TagValue }}: %w", err)
+}
+v = {{ unPointer .FieldType }}(f)
+
+{{- else if eq .FieldType "*bool" }}
+b, err := strconv.ParseBool(string(raw))
+if err != nil {
+	return fmt.Errorf("invalid bool for {{ .TagValue }}: %w", err)
+}
+v = b
+
+{{- else }}
+if err := json.Unmarshal(raw, &v); err != nil {
+	return fmt.Errorf("unmarshal error on {{ .TagValue }}: %w", err)
+}
+{{- end }}
+{{ end }}
+
+{{ define "WriteField" }}
+buf.WriteString(`"{{ .TagValue }}":`)
+{{- if eq .FieldType "string" }}
+buf.WriteString(strconv.Quote(o.{{ .FieldName }}))
+{{- else if or (eq .FieldType "int") (eq .FieldType "int8") (eq .FieldType "int16") (eq .FieldType "int32") (eq .FieldType "int64") }}
+buf.WriteString(strconv.FormatInt(int64(o.{{ .FieldName }}), 10))
+{{- else if or (eq .FieldType "uint") (eq .FieldType "uint8") (eq .FieldType "uint16") (eq .FieldType "uint32") (eq .FieldType "uint64") }}
+buf.WriteString(strconv.FormatUint(uint64(o.{{ .FieldName }}), 10))
+{{- else if or (eq .FieldType "float32") (eq .FieldType "float64") }}
+buf.WriteString(strconv.FormatFloat(float64(o.{{ .FieldName }}), 'f', -1, 64))
+{{- else if eq .FieldType "bool" }}
+buf.WriteString(strconv.FormatBool(o.{{ .FieldName }}))
+{{- else }}
+raw, err := o.{{ .FieldName }}.MarshalJSON()
+if err != nil {
+	return nil, err
+}
+buf.Write(raw)
+{{- end }}
+{{ end }}
+
+{{/* ===================== Main Template ===================== */}}
+
+{{ define "main" }}
+package {{ .PackageName }}
+
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+{{/* ---------- Helper Functions (Generated Once Per File) ---------- */}}
+
+func skipWhitespace(data []byte, i *int) {
+	for *i < len(data) {
+		switch data[*i] {
+		case ' ', '\n', '\r', '\t':
+			(*i)++
+		default:
+			return
+		}
+	}
+}
+
+func parseString(data []byte, i *int) (string, error) {
+	if data[*i] != '"' {
+		return "", fmt.Errorf("expected string")
+	}
+	(*i)++
+	start := *i
+	for *i < len(data) {
+		if data[*i] == '"' && data[*i-1] != '\\' {
+			s := string(data[start:*i])
+			(*i)++
+			return s, nil
+		}
+		(*i)++
+	}
+	return "", fmt.Errorf("unterminated string")
+}
+
+func parseRawValue(data []byte, i *int) ([]byte, error) {
+	start := *i
+	switch data[*i] {
+	case '"':
+		(*i)++
+		for *i < len(data) {
+			if data[*i] == '"' && data[*i-1] != '\\' {
+				(*i)++
+				break
+			}
+			(*i)++
+		}
+	case '{':
+		depth := 1
+		(*i)++
+		for *i < len(data) && depth > 0 {
+			switch data[*i] {
+			case '"':
+				(*i)++
+				for *i < len(data) && (data[*i] != '"' || data[*i-1] == '\\') {
+					(*i)++
+				}
+			case '{':
+				depth++
+			case '}':
+				depth--
+			}
+			(*i)++
+		}
+	case '[':
+		depth := 1
+		(*i)++
+		for *i < len(data) && depth > 0 {
+			switch data[*i] {
+			case '"':
+				(*i)++
+				for *i < len(data) && (data[*i] != '"' || data[*i-1] == '\\') {
+					(*i)++
+				}
+			case '[':
+				depth++
+			case ']':
+				depth--
+			}
+			(*i)++
+		}
+	default:
+		for *i < len(data) && !strings.ContainsRune(",} \n\r\t", rune(data[*i])) {
+			(*i)++
+		}
+	}
+	return data[start:*i], nil
+}
+
+{{/* ---------- Struct Generation ---------- */}}
+
+{{ range .Structs }}
+// MarshalJSON for {{ .Name }}
+func (o *{{ .Name }}) MarshalJSON() ([]byte, error) {
+	var buf strings.Builder
+	buf.WriteByte('{')
+
+	first := true
+	writeComma := func() {
+		if !first {
+			buf.WriteByte(',')
+		}
+		first = false
+	}
+
+	{{- range .Fields }}
+	{{- if hasOption .Options "omitempty" }}
+	{{- if .IsPointer }}
+	if o.{{ .FieldName }} != nil {
+		writeComma()
+		{{ template "WriteField" . }}
+	}
+	{{- else }}
+	writeComma()
+	{{ template "WriteField" . }}
+	{{- end }}
+	{{- else }}
+	writeComma()
+	{{ template "WriteField" . }}
+	{{- end }}
+	{{- end }}
+
+	buf.WriteByte('}')
+	return []byte(buf.String()), nil
+}
+
+// UnmarshalJSON for {{ .Name }}
+func (o *{{ .Name }}) UnmarshalJSON(data []byte) error {
+	i := 0
+	n := len(data)
+
+	skipWhitespace(data, &i)
+	if i >= n || data[i] != '{' {
+		return fmt.Errorf("expected JSON object")
+	}
+	i++
+
+	for {
+		skipWhitespace(data, &i)
+		if i < n && data[i] == '}' {
+			i++
+			return nil
+		}
+
+		key, err := parseString(data, &i)
+		if err != nil {
+			return err
+		}
+
+		skipWhitespace(data, &i)
+		if i >= n || data[i] != ':' {
+			return fmt.Errorf("expected ':' after key")
+		}
+		i++
+
+		skipWhitespace(data, &i)
+		raw, err := parseRawValue(data, &i)
+		if err != nil {
+			return err
+		}
+
+		switch key {
+		{{- range .Fields }}
+		case "{{ .TagValue }}":
+			{{- if .IsPointer -}}
+			{{ template "DecodePointer" . }}
+			{{- else if .IsBasic -}}
+			{{ template "DecodePrimitive" . }}
+			{{- else -}}
+			if err := o.{{ .FieldName }}.UnmarshalJSON(raw); err != nil {
+				return fmt.Errorf("unmarshal error on {{ .TagValue }}: %w", err)
+			}
+			{{- end }}
+		{{- end }}
+		default:
+			// Fallback for unknown fields
+			var discard any
+			if err := json.Unmarshal(raw, &discard); err != nil {
+				return err
+			}
+		}
+
+		skipWhitespace(data, &i)
+		if i < n && data[i] == ',' {
+			i++
+			continue
+		}
+		if i < n && data[i] == '}' {
+			i++
+			return nil
+		}
+	}
+}
+{{ end }}
+{{ end }}
