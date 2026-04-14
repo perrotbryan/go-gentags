@@ -87,45 +87,16 @@ It identifies structs and extracts tagged fields such as:
 `json:"name,omitempty"`
 ```
 
-### 3. Type Inspection
-
-Using `go/types`, it determines:
-
-* Whether a field is a pointer
-* Whether it is numeric or basic
-* Its exact type and package
-
-### 4. Template-Based Generation
+### 3. Template-Based Generation
 
 Each tag corresponds to a template (e.g., `json.tplt`) that defines the generated code.
 
-### 5. Code Emission
-
+### 4. File generation
 Generated files:
 
 * Are written next to their source files
 * Are automatically formatted using `go/format`
 * Contain optimized serialization logic
-
----
-
-## Reflection-Free
-
-For known types, `gentags` generates code that avoids reflection entirely.
-The JSON template 
-
-| Type              | Strategy                    |
-| ----------------- | --------------------------- |
-| Strings           | `strconv.Unquote`           |
-| Integers          | `strconv.ParseInt`          |
-| Unsigned Integers | `strconv.ParseUint`         |
-| Floats            | `strconv.ParseFloat`        |
-| Booleans          | `strconv.ParseBool`         |
-| Nested Structs    | Recursive generated code    |
-| Pointers          | Explicit null handling      |
-| Unknown Types     | Fallback to `encoding/json` |
-
-This approach delivers better performance than reflection-based approaches while remaining simple and extensible.
 
 ---
 
